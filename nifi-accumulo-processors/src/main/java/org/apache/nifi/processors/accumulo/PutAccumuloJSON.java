@@ -1,3 +1,20 @@
+/*
+ * Licensed to the Apache Software Foundation (ASF) under one or more
+ * contributor license agreements.  See the NOTICE file distributed with
+ * this work for additional information regarding copyright ownership.
+ * The ASF licenses this file to You under the Apache License, Version 2.0
+ * (the "License"); you may not use this file except in compliance with
+ * the License.  You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
 package org.apache.nifi.processors.accumulo;
 
 import org.apache.commons.lang3.StringUtils;
@@ -23,13 +40,8 @@ import org.codehaus.jackson.map.ObjectMapper;
 
 import java.io.IOException;
 import java.io.InputStream;
-import java.nio.charset.StandardCharsets;
 import java.util.*;
 import java.util.concurrent.atomic.AtomicReference;
-
-/**
- * Created by dpinkston on 9/22/16.
- */
 
 @EventDriven
 @SupportsBatching
@@ -57,8 +69,8 @@ public class PutAccumuloJSON extends AbstractPutAccumulo {
     protected static final String TEXT_VALUE = "Text";
 
     protected static final AllowableValue COMPLEX_FIELD_FAIL = new AllowableValue(FAIL_VALUE, FAIL_VALUE, "Route entire FlowFile to failure if any elements contain complex values.");
-    protected static final AllowableValue COMPLEX_FIELD_WARN = new AllowableValue(WARN_VALUE, WARN_VALUE, "Provide a warning and do not include field in row sent to HBase.");
-    protected static final AllowableValue COMPLEX_FIELD_IGNORE = new AllowableValue(IGNORE_VALUE, IGNORE_VALUE, "Silently ignore and do not include in row sent to HBase.");
+    protected static final AllowableValue COMPLEX_FIELD_WARN = new AllowableValue(WARN_VALUE, WARN_VALUE, "Provide a warning and do not include field in row sent to Accumulo.");
+    protected static final AllowableValue COMPLEX_FIELD_IGNORE = new AllowableValue(IGNORE_VALUE, IGNORE_VALUE, "Silently ignore and do not include in row sent to Accumulo.");
     protected static final AllowableValue COMPLEX_FIELD_TEXT = new AllowableValue(TEXT_VALUE, TEXT_VALUE, "Use the string representation of the complex field as the value of the given column.");
 
     protected static final PropertyDescriptor COMPLEX_FIELD_STRATEGY = new PropertyDescriptor.Builder()
@@ -77,7 +89,7 @@ public class PutAccumuloJSON extends AbstractPutAccumulo {
 
     protected static final PropertyDescriptor FIELD_ENCODING_STRATEGY = new PropertyDescriptor.Builder()
             .name("Field Encoding Strategy")
-            .description(("Indicates how to store the value of each field in HBase. The default behavior is to convert each value from the " +
+            .description(("Indicates how to store the value of each field in Accumulo. The default behavior is to convert each value from the " +
                     "JSON to a String, and store the UTF-8 bytes. Choosing Bytes will interpret the type of each field from " +
                     "the JSON, and convert the value to the byte representation of that type, meaning an integer will be stored as the " +
                     "byte representation of that integer."))
@@ -88,7 +100,6 @@ public class PutAccumuloJSON extends AbstractPutAccumulo {
 
     @Override
     public final List<PropertyDescriptor> getSupportedPropertyDescriptors() {
-        getLogger().info("Getting Properties");
 
         final List<PropertyDescriptor> properties = new ArrayList<>();
         properties.add(ACCUMULO_CLIENT_SERVICE);
@@ -106,7 +117,6 @@ public class PutAccumuloJSON extends AbstractPutAccumulo {
 
     @Override
     public Set<Relationship> getRelationships() {
-        getLogger().info("getting relationships");
 
         final Set<Relationship> rels = new HashSet<>();
         rels.add(REL_SUCCESS);
@@ -116,7 +126,6 @@ public class PutAccumuloJSON extends AbstractPutAccumulo {
 
     @Override
     protected PutFlowFile createPut(final ProcessSession session, final ProcessContext context, final FlowFile flowFile) {
-        getLogger().info("Inside createPut");
 
         final String tableName = context.getProperty(TABLE_NAME).evaluateAttributeExpressions(flowFile).getValue();
         final String rowId = context.getProperty(ROW_ID).evaluateAttributeExpressions(flowFile).getValue();
@@ -128,7 +137,6 @@ public class PutAccumuloJSON extends AbstractPutAccumulo {
         final String fieldEncodingStrategy = context.getProperty(FIELD_ENCODING_STRATEGY).getValue();
         final String rowIdEncodingStrategy = context.getProperty(ROW_ID_ENCODING_STRATEGY).getValue();
 
-        getLogger().info("About to parse JSON");
 
         // Parse the JSON document
         final ObjectMapper mapper = new ObjectMapper();
@@ -137,11 +145,8 @@ public class PutAccumuloJSON extends AbstractPutAccumulo {
             session.read(flowFile, new InputStreamCallback() {
                 @Override
                 public void process(final InputStream in) throws IOException {
-                    getLogger().info("in Process phase");
                     try (final InputStream bufferedIn = new BufferedInputStream(in)) {
-                        getLogger().info("Bufferin = " + bufferedIn);
                         rootNodeRef.set(mapper.readTree(bufferedIn));
-                        getLogger().info(rootNodeRef.toString());
                     }
                 }
             });
@@ -172,13 +177,8 @@ public class PutAccumuloJSON extends AbstractPutAccumulo {
             } else if (fieldNode.isValueNode()) {
                 // for a value node we need to determine if we are storing the bytes of a string, or the bytes of actual types
                 if (STRING_ENCODING_VALUE.equals(fieldEncodingStrategy)) {
-                    getLogger().info("STRING == fieldencoding");
-                    //final byte[] valueBytes = new String(fieldNode.toString()).getBytes(StandardCharsets.UTF_8);
                     fieldValueHolder.set(fieldNode.toString());
-                    //fieldValueHolder.set(valueBytes);
-                    }
-                 else {
-                    getLogger().info("STRING not equal to fieldencoding");
+                } else {
                     fieldValueHolder.set(extractJNodeValue(fieldNode));
                 }
             } else {
@@ -207,14 +207,8 @@ public class PutAccumuloJSON extends AbstractPutAccumulo {
             // otherwise add a new column where the fieldName and fieldValue are the column qualifier and value
             if (fieldValueHolder.get() != null) {
                 if (extractRowId && fieldName.equals(rowFieldName)) {
-                    getLogger().info("fieldVlaueHolder != null");
                     rowIdHolder.set(fieldNode.asText());
                 } else {
-                    getLogger().info("fieldVlaueHolder = null");
-                    getLogger().info(columnFamily.toString());
-                    getLogger().info(fieldName.toString());
-                    getLogger().info(columnVisibility.toString());
-                    getLogger().info(fieldValueHolder.toString());
                     //TODO: columns.add(new PutMutation(columnFamily.toString(), fieldName.getBytes(StandardCharsets.UTF_8), fieldValueHolder.get()));
                     columns.add(new PutMutation(columnFamily.toString(), fieldName.toString(), columnVisibility.toString(), fieldValueHolder.get()));
                 }
@@ -225,40 +219,16 @@ public class PutAccumuloJSON extends AbstractPutAccumulo {
         // log an error message so the user can see what the field names were and return null so it gets routed to failure
         if (extractRowId && rowIdHolder.get() == null) {
             final String fieldNameStr = StringUtils.join(rootNode.getFieldNames(), ",");
-            getLogger().error("Row ID field named '{}' not found in field names '{}'; routing to failure", new Object[] {rowFieldName, fieldNameStr});
+            getLogger().error("Row ID field named '{}' not found in field names '{}'; routing to failure", new Object[]{rowFieldName, fieldNameStr});
             return null;
         }
 
         final String putRowId = (extractRowId ? rowIdHolder.get() : rowId);
-        //byte[] rowKeyBytes = getRow(putRowId,context.getProperty(ROW_ID_ENCODING_STRATEGY).getValue());
-        String rowKb = putRowId;
-        return new PutFlowFile(tableName, rowKb, columns, flowFile);
+        return new PutFlowFile(tableName, putRowId, columns, flowFile);
     }
 
-    /*
-     *Handles the conversion of the JsonNode value into it correct underlying data type in the form of a byte array as expected by the columns.add function
-     */
-    private String extractJNodeValue(final JsonNode n){
-        getLogger().info("Extracting JSONNODEVALUE");
-        getLogger().info(n.toString());
-
+    private String extractJNodeValue(final JsonNode n) {
         return n.toString();
 
-
-   /*     if (n.isBoolean()){
-            //boolean
-            return clientService.toBytes(n.asBoolean());
-        }else if(n.isNumber()){
-            if(n.isIntegralNumber()){
-                //interpret as Long
-                return clientService.toBytes(n.asLong());
-            }else{
-                //interpret as Double
-                return clientService.toBytes(n.asDouble());
-            }
-        }else{
-            //if all else fails, interpret as String
-            return clientService.toBytes(n.asText());
-        }*/
     }
 }

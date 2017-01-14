@@ -19,37 +19,25 @@ package org.apache.nifi.processors.accumulo;
 import org.apache.commons.lang3.StringUtils;
 import org.apache.nifi.accumulo.AccumuloClientService;
 import org.apache.nifi.accumulo.put.PutFlowFile;
+import org.apache.nifi.annotation.lifecycle.OnScheduled;
 import org.apache.nifi.components.AllowableValue;
 import org.apache.nifi.components.PropertyDescriptor;
-import org.apache.nifi.components.PropertyValue;
 import org.apache.nifi.flowfile.FlowFile;
-import org.apache.nifi.processor.*;
-import org.apache.nifi.annotation.behavior.ReadsAttribute;
-import org.apache.nifi.annotation.behavior.ReadsAttributes;
-import org.apache.nifi.annotation.behavior.WritesAttribute;
-import org.apache.nifi.annotation.behavior.WritesAttributes;
-import org.apache.nifi.annotation.lifecycle.OnScheduled;
-import org.apache.nifi.annotation.documentation.CapabilityDescription;
-import org.apache.nifi.annotation.documentation.SeeAlso;
-import org.apache.nifi.annotation.documentation.Tags;
+import org.apache.nifi.processor.AbstractProcessor;
+import org.apache.nifi.processor.ProcessContext;
+import org.apache.nifi.processor.ProcessSession;
+import org.apache.nifi.processor.Relationship;
 import org.apache.nifi.processor.exception.ProcessException;
 import org.apache.nifi.processor.util.StandardValidators;
 
 import java.nio.charset.StandardCharsets;
-import java.util.*;
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
 import java.util.concurrent.TimeUnit;
 
 public abstract class AbstractPutAccumulo extends AbstractProcessor {
-
-    static final String STRING_ENCODING_VALUE = "String";
-    static final String BYTES_ENCODING_VALUE = "Bytes";
-    static final String BINARY_ENCODING_VALUE = "Binary";
-
-
-    protected static final AllowableValue ROW_ID_ENCODING_STRING = new AllowableValue(STRING_ENCODING_VALUE, STRING_ENCODING_VALUE,
-            "Stores the value of row id as a UTF-8 String.");
-    protected static final AllowableValue ROW_ID_ENCODING_BINARY = new AllowableValue(BINARY_ENCODING_VALUE, BINARY_ENCODING_VALUE,
-            "Stores the value of the rows id as a binary byte array. It expects that the row id is a binary formated string.");
 
     protected static final PropertyDescriptor ACCUMULO_CLIENT_SERVICE = new PropertyDescriptor.Builder()
             .name("Accumulo Client Service")
@@ -73,14 +61,14 @@ public abstract class AbstractPutAccumulo extends AbstractProcessor {
             .build();
     protected static final PropertyDescriptor COLUMN_FAMILY = new PropertyDescriptor.Builder()
             .name("Column Family")
-            .description("The Column Family to use when inserting data into HBase")
+            .description("The Column Family to use when inserting data into Accumulo")
             .required(true)
             .expressionLanguageSupported(true)
             .addValidator(StandardValidators.NON_EMPTY_VALIDATOR)
             .build();
     protected static final PropertyDescriptor COLUMN_QUALIFIER = new PropertyDescriptor.Builder()
             .name("Column Qualifier")
-            .description("The Column Qualifier to use when inserting data into HBase")
+            .description("The Column Qualifier to use when inserting data into Accumulo")
             .required(true)
             .expressionLanguageSupported(true)
             .addValidator(StandardValidators.NON_EMPTY_VALIDATOR)
@@ -100,28 +88,32 @@ public abstract class AbstractPutAccumulo extends AbstractProcessor {
             .addValidator(StandardValidators.POSITIVE_INTEGER_VALIDATOR)
             .defaultValue("25")
             .build();
-
-    static final PropertyDescriptor ROW_ID_ENCODING_STRATEGY = new PropertyDescriptor.Builder()
-            .name("Row Identifier Encoding Strategy")
-            .description("Specifies the data type of Row ID used when inserting data into HBase. The default behaviror is" +
-                    " to convert the row id to a UTF-8 byte array. Choosing Binary will convert a binary formatted string" +
-                    " to the correct byte[] representation. The Binary option should be used if you are using Binary row" +
-                    " keys in HBase")
-            .required(false) // not all sub-classes will require this
-            .expressionLanguageSupported(false)
-            .defaultValue(ROW_ID_ENCODING_STRING.getValue())
-            .allowableValues(ROW_ID_ENCODING_STRING,ROW_ID_ENCODING_BINARY)
-            .build();
-
     protected static final Relationship REL_SUCCESS = new Relationship.Builder()
             .name("success")
-            .description("A FlowFile is routed to this relationship after it has been successfully stored in HBase")
+            .description("A FlowFile is routed to this relationship after it has been successfully stored in Accumulo")
             .build();
     protected static final Relationship REL_FAILURE = new Relationship.Builder()
             .name("failure")
-            .description("A FlowFile is routed to this relationship if it cannot be sent to HBase")
+            .description("A FlowFile is routed to this relationship if it cannot be sent to Accumulo")
             .build();
-
+    static final String STRING_ENCODING_VALUE = "String";
+    protected static final AllowableValue ROW_ID_ENCODING_STRING = new AllowableValue(STRING_ENCODING_VALUE, STRING_ENCODING_VALUE,
+            "Stores the value of row id as a UTF-8 String.");
+    static final String BYTES_ENCODING_VALUE = "Bytes";
+    static final String BINARY_ENCODING_VALUE = "Binary";
+    protected static final AllowableValue ROW_ID_ENCODING_BINARY = new AllowableValue(BINARY_ENCODING_VALUE, BINARY_ENCODING_VALUE,
+            "Stores the value of the rows id as a binary byte array. It expects that the row id is a binary formated string.");
+    static final PropertyDescriptor ROW_ID_ENCODING_STRATEGY = new PropertyDescriptor.Builder()
+            .name("Row Identifier Encoding Strategy")
+            .description("Specifies the data type of Row ID used when inserting data into Accumulo. The default behaviror is" +
+                    " to convert the row id to a UTF-8 byte array. Choosing Binary will convert a binary formatted string" +
+                    " to the correct byte[] representation. The Binary option should be used if you are using Binary row" +
+                    " keys in Accumulo")
+            .required(false) // not all sub-classes will require this
+            .expressionLanguageSupported(false)
+            .defaultValue(ROW_ID_ENCODING_STRING.getValue())
+            .allowableValues(ROW_ID_ENCODING_STRING, ROW_ID_ENCODING_BINARY)
+            .build();
     protected AccumuloClientService clientService;
 
     @OnScheduled
@@ -137,9 +129,9 @@ public abstract class AbstractPutAccumulo extends AbstractProcessor {
             return;
         }
 
-        final Map<String,List<PutFlowFile>> tablePuts = new HashMap<>();
+        final Map<String, List<PutFlowFile>> tablePuts = new HashMap<>();
 
-        // Group FlowFiles by HBase Table
+        // Group FlowFiles by Accumulo Table
         for (final FlowFile flowFile : flowFiles) {
             final PutFlowFile putFlowFile = createPut(session, context, flowFile);
 
@@ -175,7 +167,6 @@ public abstract class AbstractPutAccumulo extends AbstractProcessor {
 
         for (Map.Entry<String, List<PutFlowFile>> entry : tablePuts.entrySet()) {
             try {
-                getLogger().info(entry.getKey() + " " + entry.getValue());
                 clientService.put(entry.getKey(), entry.getValue());
                 successes.addAll(entry.getValue());
             } catch (Exception e) {
@@ -190,11 +181,11 @@ public abstract class AbstractPutAccumulo extends AbstractProcessor {
         }
 
         final long sendMillis = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - start);
-        getLogger().debug("Sent {} FlowFiles to HBase successfully in {} milliseconds", new Object[]{successes.size(), sendMillis});
+        getLogger().debug("Sent {} FlowFiles to Accumulo successfully in {} milliseconds", new Object[]{successes.size(), sendMillis});
 
         for (PutFlowFile putFlowFile : successes) {
             session.transfer(putFlowFile.getFlowFile(), REL_SUCCESS);
-            final String details = "Put " + putFlowFile.getColumns().size() + " cells to HBase";
+            final String details = "Put " + putFlowFile.getColumns().size() + " cells to Accumulo";
             session.getProvenanceReporter().send(putFlowFile.getFlowFile(), getTransitUri(putFlowFile), details, sendMillis);
         }
 
@@ -206,15 +197,12 @@ public abstract class AbstractPutAccumulo extends AbstractProcessor {
 
     protected byte[] getRow(final String row, final String encoding) {
         //check to see if we need to modify the rowKey before we pass it down to the PutFlowFile
-        getLogger().info("In Get Row");
         byte[] rowKeyBytes = null;
-        if(BINARY_ENCODING_VALUE.contentEquals(encoding)){
+        if (BINARY_ENCODING_VALUE.contentEquals(encoding)) {
             rowKeyBytes = clientService.toBytesBinary(row);
-            getLogger().info(rowKeyBytes.toString());
 
-        }else{
+        } else {
             rowKeyBytes = row.getBytes(StandardCharsets.UTF_8);
-            getLogger().info(rowKeyBytes.toString());
         }
         return rowKeyBytes;
     }
@@ -222,13 +210,9 @@ public abstract class AbstractPutAccumulo extends AbstractProcessor {
     /**
      * Sub-classes provide the implementation to create a put from a FlowFile.
      *
-     * @param session
-     *              the current session
-     * @param context
-     *              the current context
-     * @param flowFile
-     *              the FlowFile to create a Put from
-     *
+     * @param session  the current session
+     * @param context  the current context
+     * @param flowFile the FlowFile to create a Put from
      * @return a PutFlowFile instance for the given FlowFile
      */
     protected abstract PutFlowFile createPut(final ProcessSession session, final ProcessContext context, final FlowFile flowFile);
